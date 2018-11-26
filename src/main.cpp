@@ -3,16 +3,41 @@
 //#include <Wire.h>
 #include <TimeLib.h>
 #include <SoftwareSerial.h>
+#include <Tasker.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+#include <PubSubClient.h>
+#include "RemoteDebug.h"
 
-SoftwareSerial serDebug(10, 11); // RX, TX
+//--------- Configuration
+// WiFi
+const char* ssid = "FRITZ!Box 7490";
+const char* password = "00aa11bb22cc33dd44ee55";
 
-void serDebugPrintData(byte *data) {
-  for (int i = 0; i < 8; i++) {
-    serDebug.print((int)data[i]);
-    serDebug.print(F(" "));
-  }
-  serDebug.println(F(" "));
-}
+const char* mqttServer = "m23.cloudmqtt.com";
+const char* mqttUser = "sgpjlnfw";
+const char* mqttPass = "UwGiZrpG9uBS";
+const char* mqttClientName = "ABBAurora"; //will also be used hostname and OTA name
+const char* mqttTopicPrefix = "sensEnergy/ABBAurora/";
+
+unsigned long measureDelay = 10000; //read every 60s
+// internal vars
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+Tasker tasker;
+//SoftwareSerial serDebug(10, 11); // RX, TX
+SoftwareSerial serAurora(13, 12); //Conn RS485
+
+char mqttTopicStatus[64];
+char mqttTopicIp[64];
+
+char mqttTopicPower[64];
+char mqttTopicEnergy[64];
+
+long lastReconnectAttempt = 0; //For the non blocking mqtt reconnect (in millis)
+RemoteDebug Debug;
 
 class clsAurora {
 private:
@@ -72,10 +97,10 @@ private:
 
     for (int i = 0; i < MaxAttempt; i++)
     {
-      if (Serial.write(SendData, sizeof(SendData)) != 0) {
-        Serial.flush();
+      if (serAurora.write(SendData, sizeof(SendData)) != 0) {
+        serAurora.flush();
         SendStatus = true;
-        if (Serial.readBytes(ReceiveData, sizeof(ReceiveData)) != 0) {
+        if (serAurora.readBytes(ReceiveData, sizeof(ReceiveData)) != 0) {
           if ((int)word(ReceiveData[7], ReceiveData[6]) == Crc16(ReceiveData, 0, 6)) {
             ReceiveStatus = true;
             break;
@@ -118,34 +143,34 @@ public:
     switch (id)
     {
     case 0:
-      return F("Everything is OK.");
+      return ("Everything is OK.");
       break;
     case 51:
-      return F("Command is not implemented");
+      return ("Command is not implemented");
       break;
     case 52:
-      return F("Variable does not exist");
+      return ("Variable does not exist");
       break;
     case 53:
-      return F("Variable value is out of range");
+      return ("Variable value is out of range");
       break;
     case 54:
-      return F("EEprom not accessible");
+      return ("EEprom not accessible");
       break;
     case 55:
-      return F("Not Toggled Service Mode");
+      return ("Not Toggled Service Mode");
       break;
     case 56:
-      return F("Can not send the command to internal micro");
+      return ("Can not send the command to internal micro");
       break;
     case 57:
-      return F("Command not Executed");
+      return ("Command not Executed");
       break;
     case 58:
-      return F("The variable is not available, retry");
+      return ("The variable is not available, retry");
       break;
     default:
-      return F("Sconosciuto");
+      return ("Sconosciuto");
       break;
     }
   }
@@ -154,129 +179,129 @@ public:
     switch (id)
     {
     case 0:
-      return F("Sending Parameters");
+      return ("Sending Parameters");
       break;
     case 1:
-      return F("Wait Sun / Grid");
+      return ("Wait Sun / Grid");
       break;
     case 2:
-      return F("Checking Grid");
+      return ("Checking Grid");
       break;
     case 3:
-      return F("Measuring Riso");
+      return ("Measuring Riso");
       break;
     case 4:
-      return F("DcDc Start");
+      return ("DcDc Start");
       break;
     case 5:
-      return F("Inverter Start");
+      return ("Inverter Start");
       break;
     case 6:
-      return F("Run");
+      return ("Run");
       break;
     case 7:
-      return F("Recovery");
+      return ("Recovery");
       break;
     case 8:
-      return F("Pausev");
+      return ("Pausev");
       break;
     case 9:
-      return F("Ground Fault");
+      return ("Ground Fault");
       break;
     case 10:
-      return F("OTH Fault");
+      return ("OTH Fault");
       break;
     case 11:
-      return F("Address Setting");
+      return ("Address Setting");
       break;
     case 12:
-      return F("Self Test");
+      return ("Self Test");
       break;
     case 13:
-      return F("Self Test Fail");
+      return ("Self Test Fail");
       break;
     case 14:
-      return F("Sensor Test + Meas.Riso");
+      return ("Sensor Test + Meas.Riso");
       break;
     case 15:
-      return F("Leak Fault");
+      return ("Leak Fault");
       break;
     case 16:
-      return F("Waiting for manual reset");
+      return ("Waiting for manual reset");
       break;
     case 17:
-      return F("Internal Error E026");
+      return ("Internal Error E026");
       break;
     case 18:
-      return F("Internal Error E027");
+      return ("Internal Error E027");
       break;
     case 19:
-      return F("Internal Error E028");
+      return ("Internal Error E028");
       break;
     case 20:
-      return F("Internal Error E029");
+      return ("Internal Error E029");
       break;
     case 21:
-      return F("Internal Error E030");
+      return ("Internal Error E030");
       break;
     case 22:
-      return F("Sending Wind Table");
+      return ("Sending Wind Table");
       break;
     case 23:
-      return F("Failed Sending table");
+      return ("Failed Sending table");
       break;
     case 24:
-      return F("UTH Fault");
+      return ("UTH Fault");
       break;
     case 25:
-      return F("Remote OFF");
+      return ("Remote OFF");
       break;
     case 26:
-      return F("Interlock Fail");
+      return ("Interlock Fail");
       break;
     case 27:
-      return F("Executing Autotest");
+      return ("Executing Autotest");
       break;
     case 30:
-      return F("Waiting Sun");
+      return ("Waiting Sun");
       break;
     case 31:
-      return F("Temperature Fault");
+      return ("Temperature Fault");
       break;
     case 32:
-      return F("Fan Staucked");
+      return ("Fan Staucked");
       break;
     case 33:
-      return F("Int.Com.Fault");
+      return ("Int.Com.Fault");
       break;
     case 34:
-      return F("Slave Insertion");
+      return ("Slave Insertion");
       break;
     case 35:
-      return F("DC Switch Open");
+      return ("DC Switch Open");
       break;
     case 36:
-      return F("TRAS Switch Open");
+      return ("TRAS Switch Open");
       break;
     case 37:
-      return F("MASTER Exclusion");
+      return ("MASTER Exclusion");
       break;
     case 38:
-      return F("Auto Exclusion");
+      return ("Auto Exclusion");
       break;
     case 98:
-      return F("Erasing Internal EEprom");
+      return ("Erasing Internal EEprom");
       break;
     case 99:
-      return F("Erasing External EEprom");
+      return ("Erasing External EEprom");
       break;
     case 100:
-      return F("Counting EEprom");
+      return ("Counting EEprom");
       break;
     case 101:
-      return F("Freeze");
+      return ("Freeze");
     default:
-      return F("Sconosciuto");
+      return ("Sconosciuto");
       break;
     }
   }
@@ -285,67 +310,67 @@ public:
     switch (id)
     {
     case 0:
-      return F("DcDc OFF");
+      return ("DcDc OFF");
       break;
     case 1:
-      return F("Ramp Start");
+      return ("Ramp Start");
       break;
     case 2:
-      return F("MPPT");
+      return ("MPPT");
       break;
     case 3:
-      return F("Not Used");
+      return ("Not Used");
       break;
     case 4:
-      return F("Input OC");
+      return ("Input OC");
       break;
     case 5:
-      return F("Input UV");
+      return ("Input UV");
       break;
     case 6:
-      return F("Input OV");
+      return ("Input OV");
       break;
     case 7:
-      return F("Input Low");
+      return ("Input Low");
       break;
     case 8:
-      return F("No Parameters");
+      return ("No Parameters");
       break;
     case 9:
-      return F("Bulk OV");
+      return ("Bulk OV");
       break;
     case 10:
-      return F("Communication Error");
+      return ("Communication Error");
       break;
     case 11:
-      return F("Ramp Fail");
+      return ("Ramp Fail");
       break;
     case 12:
-      return F("Internal Error");
+      return ("Internal Error");
       break;
     case 13:
-      return F("Input mode Error");
+      return ("Input mode Error");
       break;
     case 14:
-      return F("Ground Fault");
+      return ("Ground Fault");
       break;
     case 15:
-      return F("Inverter Fail");
+      return ("Inverter Fail");
       break;
     case 16:
-      return F("DcDc IGBT Sat");
+      return ("DcDc IGBT Sat");
       break;
     case 17:
-      return F("DcDc ILEAK Fail");
+      return ("DcDc ILEAK Fail");
       break;
     case 18:
-      return F("DcDc Grid Fail");
+      return ("DcDc Grid Fail");
       break;
     case 19:
-      return F("DcDc Comm.Error");
+      return ("DcDc Comm.Error");
       break;
     default:
-      return F("Sconosciuto");
+      return ("Sconosciuto");
       break;
     }
   }
@@ -354,127 +379,127 @@ public:
     switch (id)
     {
     case 0:
-      return F("Stand By");
+      return ("Stand By");
       break;
     case 1:
-      return F("Checking Grid");
+      return ("Checking Grid");
       break;
     case 2:
-      return F("Run");
+      return ("Run");
       break;
     case 3:
-      return F("Bulk OV");
+      return ("Bulk OV");
       break;
     case 4:
-      return F("Out OC");
+      return ("Out OC");
       break;
     case 5:
-      return F("IGBT Sat");
+      return ("IGBT Sat");
       break;
     case 6:
-      return F("Bulk UV");
+      return ("Bulk UV");
       break;
     case 7:
-      return F("Degauss Error");
+      return ("Degauss Error");
       break;
     case 8:
-      return F("No Parameters");
+      return ("No Parameters");
       break;
     case 9:
-      return F("Bulk Low");
+      return ("Bulk Low");
       break;
     case 10:
-      return F("Grid OV");
+      return ("Grid OV");
       break;
     case 11:
-      return F("Communication Error");
+      return ("Communication Error");
       break;
     case 12:
-      return F("Degaussing");
+      return ("Degaussing");
       break;
     case 13:
-      return F("Starting");
+      return ("Starting");
       break;
     case 14:
-      return F("Bulk Cap Fail");
+      return ("Bulk Cap Fail");
       break;
     case 15:
-      return F("Leak Fail");
+      return ("Leak Fail");
       break;
     case 16:
-      return F("DcDc Fail");
+      return ("DcDc Fail");
       break;
     case 17:
-      return F("Ileak Sensor Fail");
+      return ("Ileak Sensor Fail");
       break;
     case 18:
-      return F("SelfTest: relay inverter");
+      return ("SelfTest: relay inverter");
       break;
     case 19:
-      return F("SelfTest : wait for sensor test");
+      return ("SelfTest : wait for sensor test");
       break;
     case 20:
-      return F("SelfTest : test relay DcDc + sensor");
+      return ("SelfTest : test relay DcDc + sensor");
       break;
     case 21:
-      return F("SelfTest : relay inverter fail");
+      return ("SelfTest : relay inverter fail");
       break;
     case 22:
-      return F("SelfTest timeout fail");
+      return ("SelfTest timeout fail");
       break;
     case 23:
-      return F("SelfTest : relay DcDc fail");
+      return ("SelfTest : relay DcDc fail");
       break;
     case 24:
-      return F("Self Test 1");
+      return ("Self Test 1");
       break;
     case 25:
-      return F("Waiting self test start");
+      return ("Waiting self test start");
       break;
     case 26:
-      return F("Dc Injection");
+      return ("Dc Injection");
       break;
     case 27:
-      return F("Self Test 2");
+      return ("Self Test 2");
       break;
     case 28:
-      return F("Self Test 3");
+      return ("Self Test 3");
       break;
     case 29:
-      return F("Self Test 4");
+      return ("Self Test 4");
       break;
     case 30:
-      return F("Internal Error");
+      return ("Internal Error");
       break;
     case 31:
-      return F("Internal Error");
+      return ("Internal Error");
       break;
     case 40:
-      return F("Forbidden State");
+      return ("Forbidden State");
       break;
     case 41:
-      return F("Input UC");
+      return ("Input UC");
       break;
     case 42:
-      return F("Zero Power");
+      return ("Zero Power");
       break;
     case 43:
-      return F("Grid Not Present");
+      return ("Grid Not Present");
       break;
     case 44:
-      return F("Waiting Start");
+      return ("Waiting Start");
       break;
     case 45:
-      return F("MPPT");
+      return ("MPPT");
       break;
     case 46:
-      return F("Grid Fail");
+      return ("Grid Fail");
       break;
     case 47:
-      return F("Input OC");
+      return ("Input OC");
       break;
     default:
-      return F("Sconosciuto");
+      return ("Sconosciuto");
       break;
     }
   }
@@ -483,202 +508,202 @@ public:
     switch (id)
     {
     case 0:
-      return F("No Alarm");
+      return ("No Alarm");
       break;
     case 1:
-      return F("Sun Low");
+      return ("Sun Low");
       break;
     case 2:
-      return F("Input OC");
+      return ("Input OC");
       break;
     case 3:
-      return F("Input UV");
+      return ("Input UV");
       break;
     case 4:
-      return F("Input OV");
+      return ("Input OV");
       break;
     case 5:
-      return F("Sun Low");
+      return ("Sun Low");
       break;
     case 6:
-      return F("No Parameters");
+      return ("No Parameters");
       break;
     case 7:
-      return F("Bulk OV");
+      return ("Bulk OV");
       break;
     case 8:
-      return F("Comm.Error");
+      return ("Comm.Error");
       break;
     case 9:
-      return F("Output OC");
+      return ("Output OC");
       break;
     case 10:
-      return F("IGBT Sat");
+      return ("IGBT Sat");
       break;
     case 11:
-      return F("Bulk UV");
+      return ("Bulk UV");
       break;
     case 12:
-      return F("Internal error");
+      return ("Internal error");
       break;
     case 13:
-      return F("Grid Fail");
+      return ("Grid Fail");
       break;
     case 14:
-      return F("Bulk Low");
+      return ("Bulk Low");
       break;
     case 15:
-      return F("Ramp Fail");
+      return ("Ramp Fail");
       break;
     case 16:
-      return F("Dc / Dc Fail");
+      return ("Dc / Dc Fail");
       break;
     case 17:
-      return F("Wrong Mode");
+      return ("Wrong Mode");
       break;
     case 18:
-      return F("Ground Fault");
+      return ("Ground Fault");
       break;
     case 19:
-      return F("Over Temp.");
+      return ("Over Temp.");
       break;
     case 20:
-      return F("Bulk Cap Fail");
+      return ("Bulk Cap Fail");
       break;
     case 21:
-      return F("Inverter Fail");
+      return ("Inverter Fail");
       break;
     case 22:
-      return F("Start Timeout");
+      return ("Start Timeout");
       break;
     case 23:
-      return F("Ground Fault");
+      return ("Ground Fault");
       break;
     case 24:
-      return F("Degauss error");
+      return ("Degauss error");
       break;
     case 25:
-      return F("Ileak sens.fail");
+      return ("Ileak sens.fail");
       break;
     case 26:
-      return F("DcDc Fail");
+      return ("DcDc Fail");
       break;
     case 27:
-      return F("Self Test Error 1");
+      return ("Self Test Error 1");
       break;
     case 28:
-      return F("Self Test Error 2");
+      return ("Self Test Error 2");
       break;
     case 29:
-      return F("Self Test Error 3");
+      return ("Self Test Error 3");
       break;
     case 30:
-      return F("Self Test Error 4");
+      return ("Self Test Error 4");
       break;
     case 31:
-      return F("DC inj error");
+      return ("DC inj error");
       break;
     case 32:
-      return F("Grid OV");
+      return ("Grid OV");
       break;
     case 33:
-      return F("Grid UV");
+      return ("Grid UV");
       break;
     case 34:
-      return F("Grid OF");
+      return ("Grid OF");
       break;
     case 35:
-      return F("Grid UF");
+      return ("Grid UF");
       break;
     case 36:
-      return F("Z grid Hi");
+      return ("Z grid Hi");
       break;
     case 37:
-      return F("Internal error");
+      return ("Internal error");
       break;
     case 38:
-      return F("Riso Low");
+      return ("Riso Low");
       break;
     case 39:
-      return F("Vref Error");
+      return ("Vref Error");
       break;
     case 40:
-      return F("Error Meas V");
+      return ("Error Meas V");
       break;
     case 41:
-      return F("Error Meas F");
+      return ("Error Meas F");
       break;
     case 42:
-      return F("Error Meas Z");
+      return ("Error Meas Z");
       break;
     case 43:
-      return F("Error Meas Ileak");
+      return ("Error Meas Ileak");
       break;
     case 44:
-      return F("Error Read V");
+      return ("Error Read V");
       break;
     case 45:
-      return F("Error Read I");
+      return ("Error Read I");
       break;
     case 46:
-      return F("Table fail");
+      return ("Table fail");
       break;
     case 47:
-      return F("Fan Fail");
+      return ("Fan Fail");
       break;
     case 48:
-      return F("UTH");
+      return ("UTH");
       break;
     case 49:
-      return F("Interlock fail");
+      return ("Interlock fail");
       break;
     case 50:
-      return F("Remote Off");
+      return ("Remote Off");
       break;
     case 51:
-      return F("Vout Avg errror");
+      return ("Vout Avg errror");
       break;
     case 52:
-      return F("Battery low");
+      return ("Battery low");
       break;
     case 53:
-      return F("Clk fail");
+      return ("Clk fail");
       break;
     case 54:
-      return F("Input UC");
+      return ("Input UC");
       break;
     case 55:
-      return F("Zero Power");
+      return ("Zero Power");
       break;
     case 56:
-      return F("Fan Stucked");
+      return ("Fan Stucked");
       break;
     case 57:
-      return F("DC Switch Open");
+      return ("DC Switch Open");
       break;
     case 58:
-      return F("Tras Switch Open");
+      return ("Tras Switch Open");
       break;
     case 59:
-      return F("AC Switch Open");
+      return ("AC Switch Open");
       break;
     case 60:
-      return F("Bulk UV");
+      return ("Bulk UV");
       break;
     case 61:
-      return F("Autoexclusion");
+      return ("Autoexclusion");
       break;
     case 62:
-      return F("Grid df / dt");
+      return ("Grid df / dt");
       break;
     case 63:
-      return F("Den switch Open");
+      return ("Den switch Open");
       break;
     case 64:
-      return F("Jbox fail");
+      return ("Jbox fail");
       break;
     default:
-      return F("Sconosciuto");
+      return ("Sconosciuto");
       break;
     }
   }
@@ -743,100 +768,100 @@ public:
     switch ((char)ReceiveData[2])
     {
     case 'i':
-      Version.Par1 = F("Aurora 2 kW indoor");
+      Version.Par1 = ("Aurora 2 kW indoor");
       break;
     case 'o':
-      Version.Par1 = F("Aurora 2 kW outdoor");
+      Version.Par1 = ("Aurora 2 kW outdoor");
       break;
     case 'I':
-      Version.Par1 = F("Aurora 3.6 kW indoor");
+      Version.Par1 = ("Aurora 3.6 kW indoor");
       break;
     case 'O':
-      Version.Par1 = F("Aurora 3.0 - 3.6 kW outdoor");
+      Version.Par1 = ("Aurora 3.0 - 3.6 kW outdoor");
       break;
     case '5':
-      Version.Par1 = F("Aurora 5.0 kW outdoor");
+      Version.Par1 = ("Aurora 5.0 kW outdoor");
       break;
     case '6':
-      Version.Par1 = F("Aurora 6 kW outdoor");
+      Version.Par1 = ("Aurora 6 kW outdoor");
       break;
     case 'P':
-      Version.Par1 = F("3 - phase interface (3G74)");
+      Version.Par1 = ("3 - phase interface (3G74)");
       break;
     case 'C':
-      Version.Par1 = F("Aurora 50kW module");
+      Version.Par1 = ("Aurora 50kW module");
       break;
     case '4':
-      Version.Par1 = F("Aurora 4.2kW new");
+      Version.Par1 = ("Aurora 4.2kW new");
       break;
     case '3':
-      Version.Par1 = F("Aurora 3.6kW new");
+      Version.Par1 = ("Aurora 3.6kW new");
       break;
     case '2':
-      Version.Par1 = F("Aurora 3.3kW new");
+      Version.Par1 = ("Aurora 3.3kW new");
       break;
     case '1':
-      Version.Par1 = F("Aurora 3.0kW new");
+      Version.Par1 = ("Aurora 3.0kW new");
       break;
     case 'D':
-      Version.Par1 = F("Aurora 12.0kW");
+      Version.Par1 = ("Aurora 12.0kW");
       break;
     case 'X':
-      Version.Par1 = F("Aurora 10.0kW");
+      Version.Par1 = ("Aurora 10.0kW");
       break;
     default:
-      Version.Par1 = F("Sconosciuto");
+      Version.Par1 = ("Sconosciuto");
       break;
     }
 
     switch ((char)ReceiveData[3])
     {
     case 'A':
-      Version.Par2 = F("UL1741");
+      Version.Par2 = ("UL1741");
       break;
     case 'E':
-      Version.Par2 = F("VDE0126");
+      Version.Par2 = ("VDE0126");
       break;
     case 'S':
-      Version.Par2 = F("DR 1663 / 2000");
+      Version.Par2 = ("DR 1663 / 2000");
       break;
     case 'I':
-      Version.Par2 = F("ENEL DK 5950");
+      Version.Par2 = ("ENEL DK 5950");
       break;
     case 'U':
-      Version.Par2 = F("UK G83");
+      Version.Par2 = ("UK G83");
       break;
     case 'K':
-      Version.Par2 = F("AS 4777");
+      Version.Par2 = ("AS 4777");
       break;
     default:
-      Version.Par2 = F("Sconosciuto");
+      Version.Par2 = ("Sconosciuto");
       break;
     }
 
     switch ((char)ReceiveData[4])
     {
     case 'N':
-      Version.Par3 = F("Transformerless Version");
+      Version.Par3 = ("Transformerless Version");
       break;
     case 'T':
-      Version.Par3 = F("Transformer Version");
+      Version.Par3 = ("Transformer Version");
       break;
     default:
-      Version.Par3 = F("Sconosciuto");
+      Version.Par3 = ("Sconosciuto");
       break;
     }
 
     switch ((char)ReceiveData[5])
     {
     case 'W':
-      Version.Par4 = F("Wind version");
+      Version.Par4 = ("Wind version");
       break;
     case 'N':
-      Version.Par4 = F("PV version");
+      Version.Par4 = ("PV version");
       break;
     default:
-      Version.Par4 = F("Sconosciuto");
+      Version.Par4 = ("Sconosciuto");
       break;
     }
 
@@ -1114,10 +1139,7 @@ public:
 
 clsAurora Inverter2 = clsAurora(2);
 
-byte Menu = 0;
-
-//Thread LeggiProduzione = Thread();
-//Thread ScriviDebug = Thread();
+void leggiProduzione();
 
 String stampaDataTime(unsigned long scn)
 {
@@ -1129,15 +1151,15 @@ String stampaDataTime(unsigned long scn)
     adjustTime(scn);
 
       rtn = String(day());
-      rtn += String(F("/"));
+      rtn += String(("/"));
       rtn += String(month());
-      rtn += String(F("/"));
+      rtn += String(("/"));
       rtn += String(year());
-      rtn += String(F(" "));
+      rtn += String((" "));
       rtn += String(hour());
-      rtn += String(F(":"));
+      rtn += String((":"));
       rtn += String(minute());
-      rtn += String(F(":"));
+      rtn += String((":"));
       rtn += String(second());
     }
   }
@@ -1145,177 +1167,133 @@ String stampaDataTime(unsigned long scn)
   return rtn;
 }
 
-void LeggiProduzioneCallback() {
-  switch (Menu)
-  {
-  case 0:
-    Inverter2.ReadCumulatedEnergy(0);
-    break;
-  case 1:
-    Inverter2.ReadTimeDate();
-    break;
-  case 2:
-    Inverter2.ReadLastFourAlarms();
-    break;
-  case 3:
-    Inverter2.ReadSystemPN();
-    break;
-  case 4:
-    Inverter2.ReadSystemSerialNumber();
-    break;
-  case 5:
-    Inverter2.ReadManufacturingWeekYear();
-    break;
-  case 6:
-    Inverter2.ReadFirmwareRelease();
-    break;
-  case 7:
-    Inverter2.ReadVersion();
-    break;
-  case 8:
-    Inverter2.ReadState();
-    break;
-  case 9:
-    Inverter2.ReadDSP(3, 1);
-    break;
-  default:
-    break;
+void setup_wifi() {
+  delay(10);
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.mode(WIFI_STA); //disable AP mode, only station
+  WiFi.hostname(mqttClientName);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
   }
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
 }
 
-void clearTerm() {
-  serDebug.write(27); serDebug.print("[2J");
-  serDebug.write(27); serDebug.print("[;H");
-  serDebug.write(27); serDebug.print("[0;40;37m");
-}
 
-void clearRow() {
-  serDebug.write(27); serDebug.print("[K");
-}
-
-void ScriviDebugCallback() {
-  serDebug.write(27); serDebug.print("[;H");
-  serDebug.println("------------------------------------------");
-  serDebug.print("MENU = "); clearRow(); serDebug.println(Menu);
-  serDebug.println("------------------------------------------");
-
-  switch (Menu)
-  {
-  case 0:
-    serDebug.println("INVERTER 2");
-    serDebug.print("          Data ROW = "); clearRow(); serDebugPrintData(Inverter2.ReceiveData);
-    serDebug.print("        Read State = "); clearRow(); serDebug.println(Inverter2.CumulatedEnergy.ReadState);
-    serDebug.print("Transmission State = "); clearRow(); serDebug.println(Inverter2.TransmissionState(Inverter2.CumulatedEnergy.TransmissionState));
-    serDebug.print("      Global State = "); clearRow(); serDebug.println(Inverter2.GlobalState(Inverter2.CumulatedEnergy.GlobalState));
-    serDebug.print("           Energia = "); clearRow(); serDebug.print(Inverter2.CumulatedEnergy.Energia); serDebug.println(" Wh");
-    serDebug.println("------------------------------------------");
-    break;
-  case 1:
-    serDebug.println("INVERTER 2");
-    serDebug.print("          Data ROW = "); clearRow(); serDebugPrintData(Inverter2.ReceiveData);
-    serDebug.print("        Read State = "); clearRow(); serDebug.println(Inverter2.TimeDate.ReadState);
-    serDebug.print("Transmission State = "); clearRow(); serDebug.println(Inverter2.TransmissionState(Inverter2.TimeDate.TransmissionState));
-    serDebug.print("      Global State = "); clearRow(); serDebug.println(Inverter2.GlobalState(Inverter2.TimeDate.GlobalState));
-    serDebug.print("           Secondi = "); clearRow(); serDebug.println(Inverter2.TimeDate.Secondi);
-    serDebug.print("         Data/Time = "); clearRow(); serDebug.println(stampaDataTime(Inverter2.TimeDate.Secondi));
-    serDebug.println("------------------------------------------");
-    break;
-  case 2:
-    serDebug.println("INVERTER 2");
-    serDebug.print("          Data ROW = "); clearRow(); serDebugPrintData(Inverter2.ReceiveData);
-    serDebug.print("        Read State = "); clearRow(); serDebug.println(Inverter2.LastFourAlarms.ReadState);
-    serDebug.print("Transmission State = "); clearRow(); serDebug.println(Inverter2.TransmissionState(Inverter2.LastFourAlarms.TransmissionState));
-    serDebug.print("      Global State = "); clearRow(); serDebug.println(Inverter2.GlobalState(Inverter2.LastFourAlarms.GlobalState));
-    serDebug.print("          Alarms 1 = "); clearRow(); serDebug.println(Inverter2.AlarmState(Inverter2.LastFourAlarms.Alarms1));
-    serDebug.print("          Alarms 2 = "); clearRow(); serDebug.println(Inverter2.AlarmState(Inverter2.LastFourAlarms.Alarms2));
-    serDebug.print("          Alarms 3 = "); clearRow(); serDebug.println(Inverter2.AlarmState(Inverter2.LastFourAlarms.Alarms3));
-    serDebug.print("          Alarms 4 = "); clearRow(); serDebug.println(Inverter2.AlarmState(Inverter2.LastFourAlarms.Alarms4));
-    serDebug.println("------------------------------------------");
-    break;
-  case 3:
-    serDebug.println("INVERTER 2");
-    serDebug.print("  Data ROW = "); clearRow(); serDebugPrintData(Inverter2.ReceiveData);
-    serDebug.print("Read State = "); clearRow(); serDebug.println(Inverter2.SystemPN.ReadState);
-    serDebug.print("       P/N = "); clearRow(); serDebug.println(Inverter2.SystemPN.PN);
-    serDebug.println("------------------------------------------");
-    break;
-  case 4:
-    serDebug.println("INVERTER 2");
-    serDebug.print("     Data ROW = "); clearRow(); serDebugPrintData(Inverter2.ReceiveData);
-    serDebug.print("   Read State = "); clearRow(); serDebug.println(Inverter2.SystemSerialNumber.ReadState);
-    serDebug.print("Serial Number = "); clearRow(); serDebug.println(Inverter2.SystemSerialNumber.SerialNumber);
-    serDebug.println("------------------------------------------");
-    break;
-  case 5:
-    serDebug.println("INVERTER 2");
-    serDebug.print("          Data ROW = "); clearRow(); serDebugPrintData(Inverter2.ReceiveData);
-    serDebug.print("        Read State = "); clearRow(); serDebug.println(Inverter2.ManufacturingWeekYear.ReadState);
-    serDebug.print("Transmission State = "); clearRow(); serDebug.println(Inverter2.TransmissionState(Inverter2.ManufacturingWeekYear.TransmissionState));
-    serDebug.print("      Global State = "); clearRow(); serDebug.println(Inverter2.GlobalState(Inverter2.ManufacturingWeekYear.GlobalState));
-    serDebug.print("              Week = "); clearRow(); serDebug.println(Inverter2.ManufacturingWeekYear.Week);
-    serDebug.print("              Year = "); clearRow(); serDebug.println(Inverter2.ManufacturingWeekYear.Year);
-    serDebug.println("------------------------------------------");
-    break;
-  case 6:
-    serDebug.println("INVERTER 2");
-    serDebug.print("          Data ROW = "); clearRow(); serDebugPrintData(Inverter2.ReceiveData);
-    serDebug.print("        Read State = "); clearRow(); serDebug.println(Inverter2.FirmwareRelease.ReadState);
-    serDebug.print("Transmission State = "); clearRow(); serDebug.println(Inverter2.TransmissionState(Inverter2.FirmwareRelease.TransmissionState));
-    serDebug.print("      Global State = "); clearRow(); serDebug.println(Inverter2.GlobalState(Inverter2.FirmwareRelease.GlobalState));
-    serDebug.print("  Firmware Release = "); clearRow(); serDebug.println(Inverter2.FirmwareRelease.Release);
-    serDebug.println("------------------------------------------");
-    break;
-  case 7:
-    serDebug.println("INVERTER 2");
-    serDebug.print("          Data ROW = "); clearRow(); serDebugPrintData(Inverter2.ReceiveData);
-    serDebug.print("        Read State = "); clearRow(); serDebug.println(Inverter2.Version.ReadState);
-    serDebug.print("Transmission State = "); clearRow(); serDebug.println(Inverter2.TransmissionState(Inverter2.Version.TransmissionState));
-    serDebug.print("      Global State = "); clearRow(); serDebug.println(Inverter2.GlobalState(Inverter2.Version.GlobalState));
-    serDebug.print("           Version = "); clearRow(); serDebug.print(Inverter2.Version.Par1); serDebug.print(F(" ")); serDebug.print(Inverter2.Version.Par2); serDebug.print(F(" ")); serDebug.print(Inverter2.Version.Par3); serDebug.print(F(" ")); serDebug.println(Inverter2.Version.Par4);
-    serDebug.println("------------------------------------------");
-    break;
-  case 8:
-    serDebug.println("INVERTER 2");
-    serDebug.print("          Data ROW = "); clearRow(); serDebugPrintData(Inverter2.ReceiveData);
-    serDebug.print("        Read State = "); clearRow(); serDebug.println(Inverter2.State.ReadState);
-    serDebug.print("Transmission State = "); clearRow(); serDebug.println(Inverter2.TransmissionState(Inverter2.State.TransmissionState));
-    serDebug.print("      Global State = "); clearRow(); serDebug.println(Inverter2.GlobalState(Inverter2.State.GlobalState));
-    serDebug.print("          Inverter = "); clearRow(); serDebug.println(Inverter2.InverterState(Inverter2.State.InverterState));
-    serDebug.print("         Channel 1 = "); clearRow(); serDebug.println(Inverter2.DcDcState(Inverter2.State.Channel1State));
-    serDebug.print("         Channel 2 = "); clearRow(); serDebug.println(Inverter2.DcDcState(Inverter2.State.Channel2State));
-    serDebug.print("             Alarm = "); clearRow(); serDebug.println(Inverter2.AlarmState(Inverter2.State.AlarmState));
-    serDebug.println("------------------------------------------");
-    break;
-  default:
-    break;
+bool MqttReconnect() {
+  if (!mqttClient.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect with last will retained
+    if (mqttClient.connect(mqttClientName, mqttUser, mqttPass, mqttTopicStatus, 1, true, "offline")) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      char curIp[16];
+      sprintf(curIp, "%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3]);
+      mqttClient.publish(mqttTopicStatus, "online", true);
+      mqttClient.publish(mqttTopicIp, curIp, true);
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 5 seconds");
+    }
   }
+  return mqttClient.connected();
 }
 
-void setup()
-{
-  serDebug.begin(19200);
-  clearTerm();
-  serDebug.println("------------------------------------------");
-  serDebug.println("               AVVIO");
-  serDebug.println("------------------------------------------");
+void setup() {
+  Serial.begin(115200);
+  Serial.println("------------------------------------------");
+  Serial.println("               AVVIO");
+  Serial.println("------------------------------------------");
+  serAurora.setTimeout(500);
+  serAurora.begin(19200);
 
-  Serial.setTimeout(500);
-  Serial.begin(19200);
+  sprintf(mqttTopicStatus, "%sstatus", mqttTopicPrefix);
+  sprintf(mqttTopicIp, "%sip", mqttTopicPrefix);
+  sprintf(mqttTopicPower, "%spower", mqttTopicPrefix);
+  sprintf(mqttTopicEnergy, "%senergy", mqttTopicPrefix);
 
-  LeggiProduzioneCallback();
-  delay(500);
+  setup_wifi();
+  mqttClient.setServer(mqttServer, 15288);
+  tasker.setInterval(leggiProduzione, measureDelay);
 
-  ScriviDebugCallback();
-  delay(500);
+  //----------- OTA
+  ArduinoOTA.setHostname(mqttClientName);
 
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH) {
+      type = "sketch";
+    } else { // U_SPIFFS
+      type = "filesystem";
+    }
+    // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+    Serial.println("Start updating " + type);
+  });
+
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+    delay(1000);
+    ESP.restart();
+  });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+  ArduinoOTA.begin();
+
+  Debug.begin(mqttClientName);
+  Debug.setSerialEnabled(true);
 }
 
-void loop()
-{
-  /* if (LeggiProduzione.shouldRun()) {
-    LeggiProduzione.run();
+void loop() {
+  //handle mqtt connection, non-blocking
+  if (!mqttClient.connected()) {
+    long now = millis();
+    if (now - lastReconnectAttempt > 5000) {
+      lastReconnectAttempt = now;
+      // Attempt to reconnect
+      if (MqttReconnect()) {
+        lastReconnectAttempt = 0;
+      }
+    }
   }
-  if (ScriviDebug.shouldRun()) {
-    ScriviDebug.run();
-  } */
+  mqttClient.loop();
+  tasker.loop();
+  //handle OTA
+  ArduinoOTA.handle();
+  Debug.handle();
+}
+
+void leggiProduzione() {
+  Inverter2.ReadDSP(3, 1);
+  float potenza = Inverter2.DSP.Valore;
+  Inverter2.ReadCumulatedEnergy(0);
+  float energia = Inverter2.CumulatedEnergy.Energia;
+  if (!isnan(potenza)) {
+    mqttClient.publish(mqttTopicPower, String(potenza, 2).c_str(), true);
+    Serial.printf("Potenza istantanea: %sW\n", String(potenza, 2).c_str());
+    //rdebugA.println("Potenza istantanea: %sW\n", String(potenza, 2).c_str());
+  }
+
+  if (!isnan(energia)) {
+    mqttClient.publish(mqttTopicEnergy, String(energia, 2).c_str(), true);
+    Serial.printf("Energia accumulata: %sWh\n", String(energia, 2).c_str());
+    //rdebugA.println("Energia accumulata: %sWh\n", String(energia, 2).c_str());
+  }
 }

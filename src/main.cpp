@@ -13,12 +13,12 @@
 
 //--------- Configuration
 // WiFi
-const char* ssid = "FRITZ!Box 7490";
-const char* password = "00aa11bb22cc33dd44ee55";
+const char* ssid = "SSID";
+const char* password = "PASSWORD";
 
-const char* mqttServer = "m23.cloudmqtt.com";
-const char* mqttUser = "sgpjlnfw";
-const char* mqttPass = "UwGiZrpG9uBS";
+const char* mqttServer = "XXX.cloudmqtt.com";
+const char* mqttUser = "USERMQTT";
+const char* mqttPass = "PASSMQTT";
 const char* mqttClientName = "ABBAurora"; //will also be used hostname and OTA name
 const char* mqttTopicPrefix = "sensEnergy/ABBAurora/";
 
